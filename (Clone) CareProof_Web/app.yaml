@@ -1,0 +1,8 @@
+command: ["python", "start.py"]
+
+env:
+  - name: CAREPROOF_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+
+  - name: CAREPROOF_MODEL_ENDPOINT
+    valueFrom: model-endpoint

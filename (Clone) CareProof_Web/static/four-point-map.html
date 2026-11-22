@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CareProof · Recommended Hospitals Map</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <script
+    defer
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <style>
+    /* Layout and map controls */
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 2px;
+      background: #f4f7f5;
+      color: #193231;
+      font: 14px/1.45 system-ui, sans-serif;
+    }
+
+    .map-panel { position: relative; }
+
+    #map {
+      width: 100%;
+      height: clamp(250px, calc(100vh - 120px), 550px);
+      overflow: hidden;
+      border: 1px solid #d8e4df;
+      border-radius: 12px;
+      background: #e5eeea;
+    }
+
+    #show-all {
+      position: absolute;
+      z-index: 500;
+      top: 12px;
+      right: 12px;
+    }
+
+    button {
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    #show-all, .hospital-card {
+      border: 1px solid #d8e4df;
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    #show-all { padding: 8px 12px; font-weight: 700; }
+    button:focus-visible { outline: 3px solid #3159a4; outline-offset: 2px; }
+
+    /* Map pins and legend */
+    .map-pin {
+      display: grid;
+      place-items: center;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      background: #116257;
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 2px 6px #172d2a55;
+    }
+
+    .map-pin.origin { background: #3159a4; }
+
+    .map-pin.origin::after {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #fff;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 12px;
+      margin: 7px 0 10px;
+      color: #405954;
+      font-size: 12px;
+    }
+
+    .legend-dot {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      margin-right: 4px;
+      border-radius: 50%;
+      background: #116257;
+    }
+
+    .legend-dot.origin { background: #3159a4; }
+
+    /* Hospital cards and popups */
+    #hospital-cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .hospital-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 8px;
+      text-align: left;
+    }
+
+    .hospital-card:hover { background: #ebf4ef; }
+
+    .badge {
+      display: grid;
+      flex: 0 0 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 50%;
+      background: #e2efe9;
+      color: #116257;
+      font-weight: 800;
+    }
+
+    .hospital-card strong { display: block; overflow-wrap: anywhere; }
+    .hospital-card small { display: block; color: #405954; }
+
+    .popup h2 { margin: 0 0 6px; font-size: 17px; }
+    .popup .distance { color: #116257; font-weight: 700; }
+    .popup summary { cursor: pointer; color: #116257; font-weight: 750; }
+    .popup .detail { border-top: 1px solid #d8e4df; margin-top: 7px; padding-top: 7px; }
+    .popup .detail strong { display: block; }
+    .popup .detail p { margin: 2px 0 0; overflow-wrap: anywhere; }
+
+    #map-status { margin: 6px 0; color: #405954; }
+    #map-status:empty { display: none; }
+
+    @media (max-width: 440px) {
+      #hospital-cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="map-panel">
+    <div id="map" aria-label="Map of the starting point and ranked hospitals"></div>
+    <button id="show-all" type="button" disabled>Show all points</button>
+  </div>
+
+  <div class="legend" aria-label="Map legend">
+    <span><span class="legend-dot origin"></span>Starting point</span>
+    <span><span class="legend-dot"></span>Ranked hospital</span>
+  </div>
+
+  <p id="map-status" role="status"></p>
+  <div id="hospital-cards" aria-label="Ranked hospitals"></div>
+
+  <script>
+    // The parent page calls CareProofMap.render({ origin, hospitals }).
+    (() => {
+      const mapElement = document.getElementById("map");
+      const cards = document.getElementById("hospital-cards");
+      const status = document.getElementById("map-status");
+      const showAll = document.getElementById("show-all");
+
+      let map;
+      let markerLayer;
+      let positions = [];
+      let viewVersion = 0;
+      let tileFailed = false;
+
+      function element(tag, text, className) {
+        const node = document.createElement(tag);
+        if (text !== undefined) node.textContent = text;
+        if (className) node.className = className;
+        return node;
+      }
+
+      function coordinates(point) {
+        const latitude = point?.latitude;
+        const longitude = point?.longitude;
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+
+        return [latitude, longitude];
+      }
+
+      function distanceLabel(value) {
+        return Number.isFinite(value) ? `${value.toFixed(2)} km` : "Distance unavailable";
+      }
+
+      function itemList(value, fallback) {
+        if (Array.isArray(value)) return value.filter(Boolean).join(", ") || fallback;
+        return typeof value === "string" && value.trim() ? value : fallback;
+      }
+
+      function addDetail(parent, title, value) {
+        const section = element("div", undefined, "detail");
+        section.append(element("strong", title), element("p", value));
+        parent.append(section);
+      }
+
+      function hospitalPopup(hospital, rank) {
+        const popup = element("div", undefined, "popup");
+        popup.append(
+          element("h2", `#${rank} ${hospital.name || hospital.facility_name || "Hospital"}`),
+          element("p", distanceLabel(hospital.distance_km), "distance"),
+                    element(
+            "p",
+            `Data reliability: ${{
+              credible: "Credible",
+              uncertain: "Uncertain",
+              unreliable: "Unreliable",
+            }[hospital.tier] ?? "Unknown"}`,
+            "distance",
+          ),
+        );
+
+        const equipment = Array.isArray(hospital.equipment) ? hospital.equipment : [];
+        const matched = equipment.filter((item) => item.reported).map((item) => item.code);
+        const unconfirmed = equipment.filter((item) => !item.reported).map((item) => item.code);
+
+        const details = element("details");
+        details.open = true;
+        details.append(element("summary", "Equipment and services"));
+
+        addDetail(details, "Matched equipment",
+          itemList(hospital.matched_equipment ?? matched, "None listed"));
+        addDetail(details, "Unconfirmed equipment",
+          itemList(hospital.equipment_unconfirmed ?? unconfirmed, "None listed"));
+        addDetail(details, "Reported offerings",
+          itemList(hospital.reported_offerings, "No offerings recorded in the dataset"));
+
+        popup.append(details);
+        return popup;
+      }
+
+      function fitAllPoints() {
+        if (!map || !positions.length) return;
+
+        map.invalidateSize({ pan: false });
+        map.fitBounds(positions, {
+          padding: [28, 28],
+          maxZoom: 14,
+          animate: false,
+        });
+      }
+
+      function setupMap() {
+        if (map) return;
+
+map = L.map(mapElement, { scrollWheelZoom: true });
+        const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        });
+
+        tiles.on("tileerror", () => {
+          tileFailed = true;
+          status.textContent = "Some map tiles could not load. Hospital cards are available below.";
+        });
+
+        tiles.addTo(map);
+        markerLayer = L.layerGroup().addTo(map);
+      }
+
+      function pinIcon(rank) {
+        return L.divIcon({
+          className: rank ? "map-pin" : "map-pin origin",
+          html: rank ? String(rank) : "",
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+          popupAnchor: [0, -16],
+        });
+      }
+
+      showAll.addEventListener("click", fitAllPoints);
+
+      window.CareProofMap = {
+        render(data) {
+          const version = ++viewVersion;
+          cards.replaceChildren();
+          positions = [];
+
+          const origin = coordinates(data?.origin);
+          const hospitals = Array.isArray(data?.hospitals) ? data.hospitals.slice(0, 3) : [];
+          const hasLeaflet = Boolean(window.L);
+
+          if (hasLeaflet) {
+            setupMap();
+            markerLayer.clearLayers();
+
+            if (origin) {
+              positions.push(origin);
+              L.marker(origin, { icon: pinIcon(), title: "Starting point" })
+                .bindTooltip("Starting point")
+                .addTo(markerLayer);
+            }
+          }
+
+          hospitals.forEach((hospital, index) => {
+            const rank = index + 1;
+            const point = coordinates(hospital);
+            const name = hospital.name || hospital.facility_name || "Hospital";
+            let marker;
+
+            if (hasLeaflet && point) {
+              positions.push(point);
+              marker = L.marker(point, { icon: pinIcon(rank), title: `#${rank} ${name}` })
+                .bindPopup(hospitalPopup(hospital, rank), { maxWidth: 360 })
+                .addTo(markerLayer);
+            }
+
+            const content = element("div");
+            content.append(element("strong", name), element("small", distanceLabel(hospital.distance_km)));
+
+            const card = element(marker ? "button" : "div", undefined, "hospital-card");
+            card.append(element("span", String(rank), "badge"), content);
+
+            if (marker) {
+              card.type = "button";
+              card.addEventListener("click", () => marker.openPopup());
+            }
+
+            cards.append(card);
+          });
+
+          showAll.disabled = !positions.length;
+
+          if (!hasLeaflet) {
+            status.textContent = "The map library could not load. Hospital cards are available below.";
+          } else if (!hospitals.length) {
+            status.textContent = "No ranked hospitals were returned.";
+          } else {
+            status.textContent = tileFailed ? "Some map tiles could not load." : "";
+          }
+
+          requestAnimationFrame(() => {
+            if (version === viewVersion) fitAllPoints();
+          });
+        },
+      };
+    })();
+  </script>
+</body>
+</html>

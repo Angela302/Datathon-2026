@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CareProof | Hospital Finder</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZRyoHS5obTRR9BMY="
+        crossorigin="">
+  <link rel="stylesheet" href="/static/site.css">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+          crossorigin=""></script>
+  <script defer src="/static/site.js"></script>
+</head>
+<body>
+  <header><div class="shell brand">CareProof</div></header>
+
+  <main class="shell">
+    <h1>Find a hospital</h1>
+    <p class="notice">For a medical emergency, contact local emergency services immediately.</p>
+
+    <section class="card">
+      <h2>Describe your symptoms</h2>
+      <form id="symptom-form">
+        <label for="symptoms">What are you experiencing?</label>
+        <textarea id="symptoms" rows="3" maxlength="2000" required></textarea>
+        <p class="muted">Your description is sent to the configured AI model. Leave out names and contact information.</p>
+        <button id="suggest" disabled>Suggest care options</button>
+        <button id="manual" type="button" class="secondary" disabled>Choose manually</button>
+        <p id="ai-status" role="status"></p>
+      </form>
+    </section>
+
+    <section id="search-section" class="card" hidden>
+      <h2>Review care options and enter your location</h2>
+      <form id="search-form">
+        <label for="department">Primary department</label>
+        <select id="department" required></select>
+
+        <fieldset>
+          <legend>Equipment and services in priority order</legend>
+          <div id="equipment" class="three"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Your coordinates</legend>
+          <div class="two">
+            <label>Latitude
+              <input id="latitude" type="number" step="any" min="-90" max="90" required>
+            </label>
+            <label>Longitude
+              <input id="longitude" type="number" step="any" min="-180" max="180" required>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Optional preferences</legend>
+          <div class="two">
+            <details><summary>Facilities</summary><div id="facilities"></div></details>
+            <details><summary>Personnel</summary><div id="personnel"></div></details>
+          </div>
+        </fieldset>
+
+        <button>Find recommended hospitals</button>
+      </form>
+    </section>
+
+    <p id="search-status" role="status"></p>
+
+    <section id="results" hidden>
+      <h2>Top hospital matches</h2>
+      <p id="method" class="muted"></p>
+
+      <div class="map-layout">
+        <iframe
+  id="hospital-map"
+  title="Recommended hospitals map"
+  style="display: block; width: 100%; height: clamp(420px, 65vh, 650px); border: 0; border-radius: 14px;"
+></iframe>
+        <aside class="card">
+          <h3>Adjust ranking weights</h3>
+          <div id="weights"></div>
+          <button id="reset" type="button" class="secondary">Reset to default</button>
+        </aside>
+      </div>
+
+      <ol id="rankings" hidden></ol>
+    </section>
+  </main>
+</body>
+</html>
